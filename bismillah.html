@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Catatan Pengeluaran Operasional</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 text-gray-800 p-4 font-sans">
+  <div class="max-w-5xl mx-auto space-y-6">
+    <h1 class="text-2xl font-bold">Catatan Pengeluaran Operasional</h1>
+
+    <!-- Form Input -->
+    <form id="formInput" class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white p-4 rounded shadow">
+      <input type="date" id="tanggal" class="border p-2" />
+      <input type="text" id="username" placeholder="Username" class="border p-2" />
+      <input type="text" id="kategori" placeholder="Kategori" class="border p-2" />
+      <input type="number" id="nominal" placeholder="Nominal" class="border p-2" />
+      <input type="text" id="keterangan" placeholder="Keterangan" class="border p-2" />
+      <button type="submit" class="bg-blue-600 text-white p-2 rounded">Simpan</button>
+      <p id="notif" class="text-sm text-green-600 col-span-2"></p>
+    </form>
+
+    <!-- Tabel Data -->
+    <div class="overflow-x-auto">
+      <table class="min-w-full bg-white rounded shadow" id="dataTable">
+        <thead>
+          <tr class="bg-gray-200 text-left">
+            <th class="p-2">Tanggal</th><th class="p-2">User</th><th class="p-2">Kategori</th><th class="p-2">Nominal</th><th class="p-2">Keterangan</th><th class="p-2">Aksi</th>
+          </tr>
+        </thead>
+        <tbody id="tableBody"></tbody>
+      </table>
+    </div>
+
+    <!-- Grafik Semua User -->
+    <div>
+      <h2 class="font-bold">Grafik Semua User</h2>
+      <canvas id="chartAllUser" height="100"></canvas>
+    </div>
+
+    <!-- Grafik Harian -->
+    <div>
+      <h2 class="font-bold">Grafik Harian</h2>
+      <canvas id="chartDaily" height="100"></canvas>
+    </div>
+
+    <!-- Grafik Per User -->
+    <div>
+      <h2 class="font-bold">Grafik Per User</h2>
+      <select id="userDropdown" class="border p-2 mb-2"></select>
+      <canvas id="chartPerUser" height="100"></canvas>
+    </div>
+  </div>
+
+  <script>
+    const API = 'https://script.google.com/macros/s/AKfycbyPqGTRv5EzvvPkTOU91nSW1JJG8NkmRxhZkisYrrpWzQPsek2lUyL68oB0jxd06aZMIA/exec';
+
+    let allData = {};
+
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('tanggal').valueAsDate = new Date();
+      loadAll();
+      document.getElementById('formInput').addEventListener('submit', handleSubmit);
+      document.getElementById('userDropdown').addEventListener('change', drawPerUserChart);
+    });
+
+    function handleSubmit(e) {
+      e.preventDefault();
+      const data = {
+        action: 'save',
+        username: getVal('username'),
+        tanggal: getVal('tanggal'),
+        kategori: getVal('kategori'),
+        nominal: getVal('nominal'),
+        keterangan: getVal('keterangan')
+      };
+      fetch(API, {
+        method: 'POST',
+        body: JSON.stringify(data),
+        headers: {'Content-Type': 'application/json'}
+      })
+      .then(r => r.json())
+      .then(res => {
+        document.getElementById('notif').textContent = res.message;
+        loadAll();
+      });
+    }
+
+    function getVal(id) {
+      return document.getElementById(id).value;
+    }
+
+    function loadAll() {
+      fetch(`${API}?action=getAllData`)
+        .then(res => res.json())
+        .then(data => {
+          allData = data;
+          renderTable(data);
+          drawAllUserChart(data);
+          drawDailyChart(data);
+        });
+
+      fetch(`${API}?action=getUsers`)
+        .then(res => res.json())
+        .then(users => {
+          const dropdown = document.getElementById('userDropdown');
+          dropdown.innerHTML = '';
+          users.forEach(u => {
+            const opt = document.createElement('option');
+            opt.value = u;
+            opt.textContent = u;
+            dropdown.appendChild(opt);
+          });
+          drawPerUserChart();
+        });
+    }
+
+    function renderTable(data) {
+      const tbody = document.getElementById('tableBody');
+      tbody.innerHTML = '';
+      Object.entries(data).forEach(([user, rows]) => {
+        rows.forEach((row, i) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `
+            <td class="p-2">${row[0]}</td>
+            <td class="p-2">${user}</td>
+            <td class="p-2">${row[1]}</td>
+            <td class="p-2">Rp${row[2].toLocaleString()}</td>
+            <td class="p-2">${row[3]}</td>
+            <td class="p-2">
+              <button onclick="hapus('${user}', ${i+2})" class="text-red-600">Hapus</button>
+            </td>
+          `;
+          tbody.appendChild(tr);
+        });
+      });
+    }
+
+    function hapus(user, rowIndex) {
+      if (!confirm("Yakin hapus baris ini?")) return;
+      fetch(API, {
+        method: 'POST',
+        body: JSON.stringify({action:'delete', username:user, rowIndex}),
+        headers: {'Content-Type': 'application/json'}
+      }).then(r => r.json())
+        .then(res => {
+          alert(res.message);
+          loadAll();
+        });
+    }
+
+    function drawAllUserChart(data) {
+      const totalPerUser = {};
+      Object.entries(data).forEach(([user, rows]) => {
+        totalPerUser[user] = rows.reduce((sum, r) => sum + Number(r[2]), 0);
+      });
+      drawChart('chartAllUser', Object.keys(totalPerUser), Object.values(totalPerUser), 'Total Pengeluaran per User');
+    }
+
+    function drawDailyChart(data) {
+      const daily = {};
+      Object.values(data).flat().forEach(r => {
+        daily[r[0]] = (daily[r[0]] || 0) + Number(r[2]);
+      });
+      const dates = Object.keys(daily).sort();
+      drawChart('chartDaily', dates, dates.map(d => daily[d]), 'Total Pengeluaran Harian');
+    }
+
+    function drawPerUserChart() {
+      const user = document.getElementById('userDropdown').value;
+      if (!user || !allData[user]) return;
+      const data = {};
+      allData[user].forEach(r => {
+        data[r[0]] = (data[r[0]] || 0) + Number(r[2]);
+      });
+      const dates = Object.keys(data).sort();
+      drawChart('chartPerUser', dates, dates.map(d => data[d]), `Pengeluaran Harian - ${user}`);
+    }
+
+    let chartInstances = {};
+
+    function drawChart(canvasId, labels, data, label) {
+      if (chartInstances[canvasId]) chartInstances[canvasId].destroy();
+      const ctx = document.getElementById(canvasId).getContext('2d');
+      chartInstances[canvasId] = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels,
+          datasets: [{label, data, backgroundColor: '#3b82f6'}]
+        },
+        options: {
+          responsive: true,
+          scales: {y: {beginAtZero: true}}
+        }
+      });
+    }
+  </script>
+</body>
+</html>
